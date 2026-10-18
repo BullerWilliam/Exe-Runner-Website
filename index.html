@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>EXE Runner</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101521; color: #eef2f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; padding: clamp(20px, 4vw, 52px); }
+    main { max-width: 1200px; margin: auto; }
+    .eyebrow { color: #72d5ca; font-size: .8rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -.04em; margin: .3em 0; }
+    p { color: #b7c1cf; line-height: 1.55; }
+    .card { background: #1b2332; border: 1px solid #344052; border-radius: 18px; padding: clamp(20px, 3vw, 32px); margin-top: 28px; }
+    .row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    code { background: #101521; border: 1px solid #344052; border-radius: 6px; padding: 3px 7px; color: #e3e8f1; }
+    button { background: #72d5ca; color: #10201f; font: inherit; font-weight: 700; border: 0; border-radius: 9px; padding: 13px 22px; cursor: pointer; }
+    button:hover:not(:disabled) { background: #9aebe2; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { margin: 16px 0 0; min-height: 24px; }
+    #status.error { color: #ffaaa8; }
+    #status.success { color: #91e5ad; }
+    #runner { display: none; width: 100%; height: min(75vh, 850px); min-height: 540px; border: 1px solid #344052; border-radius: 12px; background: #fff; margin-top: 22px; }
+    .hint { font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">WebAssembly · x86 · Wine</div>
+    <h1>EXE Runner</h1>
+    <p>Start Windows-programmet <code>app.exe</code> fra samme mappe som denne side. Programmet kører i browserens BoxedWine-emulator.</p>
+    <section class="card" aria-label="Start program">
+      <div class="row">
+        <button id="launch" type="button">Start app.exe</button>
+        <span>Kun 32-bit x86-programmer understøttes af denne BoxedWine-udgave.</span>
+      </div>
+      <p id="status" role="status" aria-live="polite">Klar til at kontrollere app.exe.</p>
+      <iframe id="runner" title="BoxedWine: app.exe" allow="fullscreen; autoplay"></iframe>
+      <p class="hint">Første start henter Wine-miljøet på ca. 37 MB. Kør siden via en webserver, f.eks. <code>python3 -m http.server 8000</code>, og åbn <code>http://localhost:8000/</code>.</p>
+    </section>
+  </main>
+  <script>
+    const button = document.getElementById('launch');
+    const status = document.getElementById('status');
+    const runner = document.getElementById('runner');
+    function show(message, kind = '') {
+      status.textContent = message;
+      status.className = kind;
+    }
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      show('Kontrollerer app.exe…');
+      try {
+        const response = await fetch('app.exe', { method: 'HEAD', cache: 'no-store' });
+        if (!response.ok) throw new Error('app.exe blev ikke fundet ved siden af index.html (HTTP ' + response.status + ').');
+        const runtimeFiles = ['boxedwine.html', 'boxedwine.js', 'boxedwine.wasm', 'boxedwine.zip', 'boxedwine-shell.js', 'app-loader.js', 'boxedwine.css'];
+        const checks = await Promise.all(runtimeFiles.map(async file => {
+          const result = await fetch('runtime/' + file, { method: 'HEAD', cache: 'no-store' });
+          return result.ok ? null : file;
+        }));
+        const missing = checks.filter(Boolean);
+        if (missing.length) throw new Error('Runtime-mappen mangler filer: ' + missing.join(', ') + '. Kopiér hele runtime-mappen fra projektet til mappen med index.html.');
+        runner.src = 'runtime/boxedwine.html?siblingExe=1&app=app&p=app.exe';
+        runner.style.display = 'block';
+        show('Indlæser WebAssembly, x86-emulator og Wine. Det kan tage lidt tid første gang.', 'success');
+      } catch (error) {
+        button.disabled = false;
+        show(error.message, 'error');
+      }
+    });
+    window.addEventListener('message', event => {
+      if (event.origin !== window.location.origin || event.source !== runner.contentWindow) return;
+      if (event.data && event.data.type === 'app-error') {
+        show(event.data.message, 'error');
+        button.disabled = false;
+        runner.style.display = 'none';
+        runner.removeAttribute('src');
+      } else if (event.data && event.data.type === 'wine-started') {
+        show('Wine er startet. Se programmet eller konsollen nedenfor.', 'success');
+      }
+    });
+  </script>
+</body>
+</html>
